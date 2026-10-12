@@ -1,0 +1,31 @@
+{
+  "name": "@sn0wo2/opencode-terminal-progress",
+  "version": "0.1.0",
+  "type": "module",
+  "publishConfig": {
+    "access": "public"
+  },
+  "files": [
+    "src"
+  ],
+  "exports": {
+    "./tui": "./src/tui.ts"
+  },
+  "scripts": {
+    "check": "tsc --noEmit",
+    "format": "prettier --write .",
+    "format:check": "prettier --check ."
+  },
+  "dependencies": {
+    "@opencode/plugin": "2.0.18"
+  },
+  "peerDependencies": {
+    "solid-js": ">=1.9.0"
+  },
+  "devDependencies": {
+    "@opentui/core": "0.5.12",
+    "@types/bun": "^1.4.2",
+    "prettier": "^3.6.2",
+    "typescript": "^7.0.2"
+  }
+}
