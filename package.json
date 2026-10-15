@@ -6,7 +6,8 @@
     "access": "public"
   },
   "files": [
-    "src"
+    "src",
+    "assets"
   ],
   "exports": {
     "./tui": "./src/tui.ts"
@@ -17,15 +18,15 @@
     "format:check": "prettier --check ."
   },
   "dependencies": {
-    "@opencode/plugin": "2.0.18"
+    "@opencode/plugin": "^2.0.29"
   },
   "peerDependencies": {
     "solid-js": ">=1.9.0"
   },
   "devDependencies": {
-    "@opentui/core": "0.5.12",
-    "@types/bun": "^1.4.2",
-    "prettier": "^3.6.2",
+    "@opentui/core": "~0.6.6",
+    "@types/bun": "^1.4.3",
+    "prettier": "^3.9.10",
     "typescript": "^7.0.2"
   }
 }
