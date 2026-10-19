@@ -1,52 +1,22 @@
-import { existsSync } from "node:fs";
-import { join } from "node:path";
 import { Plugin } from "@opencode/plugin/tui";
-
-type ProgressState = 0 | 1 | 4;
-
-const PLUGIN_AUMID = "sn0wo2.opencode-terminal-progress";
+import { createSystemToast } from "./platform";
 
 export default Plugin.define({
   id: "oc-terminal-progress",
   setup(context) {
-    const toastEnabled = context.options.toast !== false;
+    const systemToast =
+      context.options.toast !== false ? createSystemToast() : undefined;
     let currentSessionId: string | undefined;
-    let state: ProgressState = 0;
+    let state = 0;
     let idleTimer: ReturnType<typeof setTimeout> | undefined;
+    let completionTimer: ReturnType<typeof setTimeout> | undefined;
+    let completionSessionId: string | undefined;
+    let completionVisible = false;
+    let activeFamily = new Set<string>();
     let disposed = false;
-    let lastNotifiedAt = 0;
-    let shortcutReady = false;
     const seen = new Set<string>();
-
-    if (toastEnabled && process.platform === "win32" && process.env.APPDATA) {
-      const lnk = join(
-        process.env.APPDATA,
-        "Microsoft\\Windows\\Start Menu\\Programs\\OpenCode Terminal Progress.lnk",
-      );
-      shortcutReady = existsSync(lnk);
-      if (!shortcutReady)
-        Bun.spawn(
-          [
-            "powershell.exe",
-            "-NoProfile",
-            "-NonInteractive",
-            "-File",
-            join(import.meta.dir, "..", "assets", "shortcut.ps1"),
-          ],
-          {
-            env: {
-              ...process.env,
-              OC_TP_LNK: lnk,
-              OC_TP_TARGET: process.execPath,
-              OC_TP_ICON: join(import.meta.dir, "..", "assets", "icon.ico"),
-              OC_TP_AUMID: PLUGIN_AUMID,
-            },
-            stdout: "ignore",
-            stderr: "ignore",
-            windowsHide: true,
-          },
-        );
-    }
+    const permissionTimers = new Map<string, ReturnType<typeof setTimeout>>();
+    const eligiblePermissions = new Set<string>();
 
     const write = (sequence: string) => {
       const renderer = context.renderer;
@@ -64,10 +34,17 @@ export default Plugin.define({
       if (captured) renderer.externalOutputMode = "capture-stdout";
     };
 
-    const setState = (next: ProgressState) => {
-      if (next === state) return;
+    const setState = (next: number) => {
+      if (next === state && !completionVisible) return;
       write(`\x1b]9;4;${next}${next === 4 ? ";100" : ""}\x07`);
       state = next;
+      completionVisible = false;
+    };
+
+    const clearCompletion = () => {
+      clearTimeout(completionTimer);
+      completionTimer = undefined;
+      completionSessionId = undefined;
     };
 
     const remember = (event: { type: string; id: string }) => {
@@ -84,87 +61,132 @@ export default Plugin.define({
       return true;
     };
 
-    const sessionNotify = (sessionID: string, message: string) => {
+    const normalize = (text: string, limit: number) => {
+      const value = text.replace(/[\s\u0000-\u001f\u007f]+/gu, " ").trim();
+      return value.length > limit
+        ? `${value.slice(0, limit - 1).trimEnd()}…`
+        : value;
+    };
+
+    const sessionNotify = (
+      sessionID: string,
+      message: string,
+      ring: boolean,
+      includeChild = false,
+    ) => {
       const session = context.data.session.get(sessionID);
-      if (session?.parentID !== undefined || disposed) return;
-      const now = Date.now();
-      if (now - lastNotifiedAt < 1000) return;
-      lastNotifiedAt = now;
+      if ((!includeChild && session?.parentID !== undefined) || disposed)
+        return;
+      if (ring && context.options.bell !== false) write("\x07");
+      if (!systemToast) return;
+      systemToast(
+        normalize(
+          context.data.session.get(context.data.session.root(sessionID))
+            ?.title ??
+            session?.title ??
+            "OpenCode",
+          100,
+        ),
+        normalize(message, 240),
+      );
+    };
+
+    const schedulePermission = (sessionID: string, requestID: string) => {
+      const key = `${sessionID}:${requestID}`;
+      if (
+        eligiblePermissions.has(key) ||
+        permissionTimers.has(key) ||
+        !remember({ type: "permission.request", id: key })
+      )
+        return;
+      permissionTimers.set(
+        key,
+        setTimeout(() => {
+          permissionTimers.delete(key);
+          void (async () => {
+            let requests = context.data.session.permission.list(sessionID);
+            if (requests === undefined) {
+              await context.data.session.permission
+                .sync(sessionID)
+                .catch(() => {});
+              requests = context.data.session.permission.list(sessionID);
+            }
+            const pending = requests?.find((entry) => entry.id === requestID);
+            if (!pending || disposed) return;
+            eligiblePermissions.add(key);
+            if (activeFamily.has(sessionID)) clearCompletion();
+            sessionNotify(
+              sessionID,
+              `Permission required: ${pending.action}${pending.resources.length ? `; Resources: ${pending.resources.join(", ")}` : ""}${pending.message ? `; ${pending.message}` : ""}`,
+              true,
+              true,
+            );
+            queueMicrotask(update);
+          })();
+        }, 500),
+      );
+    };
+
+    const finish = (sessionID: string, result: 1 | 2) => {
+      const route = context.ui.router.current();
+      if (route.type !== "session" || route.sessionID !== sessionID)
+        return false;
+      clearTimeout(idleTimer);
+      idleTimer = undefined;
+      clearCompletion();
+      completionSessionId = sessionID;
+      write(`\x1b]9;4;${result};100\x07`);
+      completionVisible = true;
       if (context.options.bell !== false) write("\x07");
-      if (!toastEnabled) return;
-      const title = session?.title ?? "OpenCode";
-      if (process.platform === "win32")
-        Bun.spawn(
-          [
-            "powershell.exe",
-            "-NoProfile",
-            "-NonInteractive",
-            "-Command",
-            `
-[Windows.UI.Notifications.ToastNotificationManager, Windows.UI.Notifications, ContentType = WindowsRuntime] | Out-Null
-$template = [Windows.UI.Notifications.ToastNotificationManager]::GetTemplateContent([Windows.UI.Notifications.ToastTemplateType]::ToastText02)
-$text = $template.GetElementsByTagName("text")
-$text.Item(0).AppendChild($template.CreateTextNode($env:OC_TERMINAL_PROGRESS_TITLE)) | Out-Null
-$text.Item(1).AppendChild($template.CreateTextNode($env:OC_TERMINAL_PROGRESS_MESSAGE)) | Out-Null
-[Windows.UI.Notifications.ToastNotificationManager]::CreateToastNotifier($env:OC_TERMINAL_PROGRESS_APP_ID).Show([Windows.UI.Notifications.ToastNotification]::new($template))
-`,
-          ],
-          {
-            env: {
-              ...process.env,
-              OC_TERMINAL_PROGRESS_APP_ID: shortcutReady
-                ? PLUGIN_AUMID
-                : "{1AC14E77-02E7-4E5D-B744-2EB1AE5198B7}\\WindowsPowerShell\\v1.0\\powershell.exe",
-              OC_TERMINAL_PROGRESS_TITLE: title,
-              OC_TERMINAL_PROGRESS_MESSAGE: message,
-            },
-            stdout: "ignore",
-            stderr: "ignore",
-            windowsHide: true,
-          },
-        );
-      else if (process.platform === "darwin")
-        Bun.spawn(
-          [
-            "osascript",
-            "-e",
-            `display notification ${JSON.stringify(message)} with title ${JSON.stringify(title)}`,
-          ],
-          { stdout: "ignore", stderr: "ignore" },
-        );
-      else {
-        const notifySend = Bun.which("notify-send");
-        if (notifySend)
-          Bun.spawn([notifySend, title, message], {
-            stdout: "ignore",
-            stderr: "ignore",
-          });
-      }
+      completionTimer = setTimeout(() => {
+        completionTimer = undefined;
+        if (disposed || completionSessionId !== sessionID) return;
+        setState(0);
+        if (context.data.session.status(sessionID) !== "running")
+          completionSessionId = undefined;
+        update();
+      }, 1500);
+      return true;
     };
 
     const update = () => {
       if (disposed) return;
       const route = context.ui.router.current();
       const sessionId = route.type === "session" ? route.sessionID : undefined;
-      let next: ProgressState = 0;
+      activeFamily = new Set(
+        sessionId ? [sessionId, ...context.data.session.family(sessionId)] : [],
+      );
+      if (completionSessionId && !activeFamily.has(completionSessionId))
+        clearCompletion();
+      else if (completionSessionId) {
+        if (completionTimer !== undefined) return;
+        if (context.data.session.status(completionSessionId) === "running")
+          return;
+        completionSessionId = undefined;
+      }
+      let next = 0;
       if (sessionId) {
         let waiting = false;
-        for (const id of new Set([
-          sessionId,
-          ...context.data.session.family(sessionId),
-        ])) {
+        for (const id of activeFamily) {
           const permissions = context.data.session.permission.list(id);
           const forms = context.data.session.form.list(id);
           if (permissions === undefined)
             void context.data.session.permission.sync(id).catch(() => {});
+          else {
+            for (const permission of permissions)
+              schedulePermission(id, permission.id);
+            waiting ||= permissions.some((permission) =>
+              eligiblePermissions.has(`${id}:${permission.id}`),
+            );
+          }
           if (forms === undefined)
             void context.data.session.form.sync(id).catch(() => {});
-          waiting ||= !!(permissions?.length || forms?.length);
+          waiting ||= !!forms?.length;
         }
         next = waiting
           ? 4
           : context.data.session.status(sessionId) === "running"
-            ? 1
+            ? 3
             : 0;
       }
       if (next || sessionId !== currentSessionId) {
@@ -184,27 +206,46 @@ $text.Item(1).AppendChild($template.CreateTextNode($env:OC_TERMINAL_PROGRESS_MES
       const { type } = details;
       if (type === "permission.asked") {
         if (remember(details))
-          sessionNotify(
-            details.data.sessionID,
-            `Permission required: ${details.data.action}`,
-          );
+          schedulePermission(details.data.sessionID, details.data.id);
+      } else if (type === "permission.replied") {
+        const key = `${details.data.sessionID}:${details.data.requestID}`;
+        clearTimeout(permissionTimers.get(key));
+        permissionTimers.delete(key);
+        eligiblePermissions.delete(key);
       } else if (type === "form.created") {
-        if (remember(details))
+        if (remember(details)) {
+          if (activeFamily.has(details.data.form.sessionID)) clearCompletion();
           sessionNotify(
             details.data.form.sessionID,
-            `Question: ${details.data.form.title}`,
+            `Awaiting answer: ${details.data.form.title}`,
+            true,
+            true,
           );
-      } else if (type === "session.execution.succeeded") {
-        if (remember(details))
-          sessionNotify(details.data.sessionID, "Task completed");
-      } else if (type === "session.execution.failed") {
-        if (remember(details))
-          sessionNotify(details.data.sessionID, "Task failed");
+        }
+      } else if (
+        type === "session.execution.succeeded" ||
+        type === "session.execution.failed"
+      ) {
+        if (remember(details)) {
+          sessionNotify(
+            details.data.sessionID,
+            details.type === "session.execution.failed"
+              ? `Task failed: ${details.data.error.message}`
+              : "Task completed",
+            !finish(
+              details.data.sessionID,
+              type === "session.execution.succeeded" ? 1 : 2,
+            ),
+          );
+        }
+      } else if (type === "session.execution.started") {
+        if (activeFamily.has(details.data.sessionID)) clearCompletion();
       }
       if (
         type.startsWith("permission.") ||
         type.startsWith("form.") ||
         type === "session.status" ||
+        type === "session.execution.started" ||
         type === "tui.session.select"
       )
         queueMicrotask(update);
@@ -216,6 +257,9 @@ $text.Item(1).AppendChild($template.CreateTextNode($env:OC_TERMINAL_PROGRESS_MES
       disposed = true;
       clearInterval(timer);
       clearTimeout(idleTimer);
+      clearCompletion();
+      for (const timeout of permissionTimers.values()) clearTimeout(timeout);
+      permissionTimers.clear();
       unsubscribe();
       setState(0);
     };
