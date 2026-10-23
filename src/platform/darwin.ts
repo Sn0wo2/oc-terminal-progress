@@ -1,4 +1,4 @@
-export const createDarwinToast = () => (title: string, message: string) => {
+export const showDarwinToast = (title: string, message: string) => {
   Bun.spawn(
     [
       "osascript",
