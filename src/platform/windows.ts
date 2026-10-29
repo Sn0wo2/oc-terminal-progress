@@ -1,22 +1,19 @@
-import { existsSync } from "node:fs";
-import { join } from "node:path";
+import { existsSync } from "node:fs"
+import { join } from "node:path"
 
-const PLUGIN_AUMID = "sn0wo2.opencode-terminal-progress";
+const PLUGIN_AUMID = "sn0wo2.opencode-terminal-progress"
 const silentWindowsSpawnOptions = {
   stdout: "ignore",
   stderr: "ignore",
   windowsHide: true,
-} as const;
+} as const
 
 export const createWindowsToast = () => {
-  const appData = process.env.APPDATA;
+  const appData = process.env["APPDATA"]
   const shortcut = appData
-    ? join(
-        appData,
-        "Microsoft\\Windows\\Start Menu\\Programs\\OpenCode Terminal Progress.lnk",
-      )
-    : undefined;
-  let shortcutReady = shortcut !== undefined && existsSync(shortcut);
+    ? join(appData, "Microsoft\\Windows\\Start Menu\\Programs\\OpenCode Terminal Progress.lnk")
+    : undefined
+  let shortcutReady = shortcut !== undefined && existsSync(shortcut)
 
   if (shortcut && !shortcutReady)
     Bun.spawn(
@@ -37,11 +34,10 @@ export const createWindowsToast = () => {
         },
         ...silentWindowsSpawnOptions,
       },
-    );
+    )
 
   return (title: string, message: string) => {
-    if (!shortcutReady && shortcut && existsSync(shortcut))
-      shortcutReady = true;
+    if (!shortcutReady && shortcut && existsSync(shortcut)) shortcutReady = true
     Bun.spawn(
       [
         "powershell.exe",
@@ -68,6 +64,6 @@ $text.Item(1).AppendChild($template.CreateTextNode($env:OC_TERMINAL_PROGRESS_MES
         },
         ...silentWindowsSpawnOptions,
       },
-    );
-  };
-};
+    )
+  }
+}
