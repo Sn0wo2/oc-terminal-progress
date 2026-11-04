@@ -3,7 +3,7 @@
   "configVersion": 1,
   "workspaces": {
     "": {
-      "name": "@me0wo/opencode-terminal-progress",
+      "name": "oc-terminal-progress",
       "dependencies": {
         "@opencode/plugin": "^2.2.5",
       },
