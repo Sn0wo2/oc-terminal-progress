@@ -1,6 +1,6 @@
 {
   "name": "@me0wo/opencode-terminal-progress",
-  "version": "0.1.0",
+  "version": "0.0.0",
   "type": "module",
   "description": "OpenCode TUI plugin for terminal notifications: system toasts, bell, OSC notify, and progress",
   "repository": {
@@ -32,9 +32,9 @@
     "solid-js": ">=1.9.0"
   },
   "devDependencies": {
+    "@biomejs/biome": "^2.6.5",
     "@opentui/core": "~0.6.8",
     "@types/bun": "^1.4.4",
-    "@biomejs/biome": "^2.6.5",
     "typescript": "^7.0.2"
   },
   "overrides": {
