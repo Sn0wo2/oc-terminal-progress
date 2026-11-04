@@ -11,7 +11,17 @@ export default Plugin.define({
       oscNotify?: "9" | "777" | "99"
       oscProgress?: boolean
     }
-    const systemToast = toast !== false ? createSystemToast() : undefined
+    const systemToast =
+      toast !== false
+        ? createSystemToast((sessionID) => {
+            if (
+              context.ui.tabs.enabled() &&
+              (context.ui.tabs.focus(sessionID) || context.ui.tabs.focus(context.data.session.root(sessionID)))
+            )
+              return
+            context.ui.router.navigate({ type: "session", sessionID })
+          })
+        : undefined
     let notificationId = 0
     let currentSessionId: string | undefined
     let state = 0
@@ -68,7 +78,7 @@ export default Plugin.define({
         100,
       )
       const body = normalizeText(message, 240)
-      if (systemToast && claimNotification(eventID, "toast")) systemToast(title, body)
+      if (systemToast && claimNotification(eventID, "toast")) systemToast(title, body, sessionID)
       if (oscNotify && claimNotification(eventID, "osc")) {
         if (oscNotify === "9") writeTerminal(context.renderer, `\x1b]9;${title.replaceAll(";", ",")}: ${body}\x07`)
         else if (oscNotify === "777")
@@ -231,6 +241,7 @@ export default Plugin.define({
       for (const timeout of permissionTimers.values()) clearTimeout(timeout)
       permissionTimers.clear()
       unsubscribe()
+      systemToast?.dispose?.()
       setState(0)
     }
   },

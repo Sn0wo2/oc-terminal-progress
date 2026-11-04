@@ -1,5 +1,15 @@
 $ErrorActionPreference = 'Stop'
 
+# Register the per-user toast activation protocol. The inline handler is path-independent:
+# it parses the payload URI (octp://click?p=<port>&t=<token>&s=<sessionID>) and forwards it
+# to the plugin's localhost activation server.
+$command = 'powershell.exe -NoProfile -NonInteractive -WindowStyle Hidden -Command "$u=[uri]''%1'';$q=$u.Query;$p=[regex]::Match($q,''[?&]p=(\d+)'').Groups[1].Value;$t=[regex]::Match($q,''[?&]t=([\w-]+)'').Groups[1].Value;$s=[regex]::Match($q,''[?&]s=([\w%-]+)'').Groups[1].Value;if($p -and $t){try{Invoke-WebRequest -UseBasicParsing -TimeoutSec 3 -Uri((''http://127.0.0.1:{0}/click?t={1}&s={2}'' -f $p,$t,$s))|Out-Null}catch{}}"'
+New-Item -Path 'HKCU:\Software\Classes\octp\shell\open\command' -Force | Out-Null
+Set-ItemProperty -Path 'HKCU:\Software\Classes\octp' -Name '(Default)' -Value 'URL:OpenCode Terminal Progress'
+New-ItemProperty -Path 'HKCU:\Software\Classes\octp' -Name 'URL Protocol' -Value '' -PropertyType String -Force | Out-Null
+Set-ItemProperty -Path 'HKCU:\Software\Classes\octp\shell\open\command' -Name '(Default)' -Value $command
+
+if ($env:OC_TP_LNK -and $env:OC_TP_TARGET -and $env:OC_TP_ICON) {
 Add-Type -TypeDefinition @"
 using System;
 using System.Runtime.InteropServices;
@@ -79,4 +89,5 @@ namespace OcTerminalProgress {
 }
 "@
 
-[OcTerminalProgress.Shortcut]::Create($env:OC_TP_LNK, $env:OC_TP_TARGET, $env:OC_TP_ICON, $env:OC_TP_AUMID)
+  [OcTerminalProgress.Shortcut]::Create($env:OC_TP_LNK, $env:OC_TP_TARGET, $env:OC_TP_ICON, $env:OC_TP_AUMID)
+}

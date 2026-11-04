@@ -1,6 +1,6 @@
 export const createLinuxToast = () => {
   const notifySend = Bun.which("notify-send")
-  return (title: string, message: string) => {
+  return (title: string, message: string, _sessionID?: string) => {
     if (notifySend)
       Bun.spawn([notifySend, title, message], {
         stdout: "ignore",
