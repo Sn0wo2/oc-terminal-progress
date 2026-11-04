@@ -1,0 +1,108 @@
+name: Release
+
+on:
+  push:
+    tags: ["v*"]
+  workflow_dispatch:
+    inputs:
+      version:
+        description: Version to release (e.g. 0.1.1)
+        required: true
+        type: string
+
+permissions: {}
+
+concurrency:
+  group: release
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+      id-token: write
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          ref: ${{ github.event_name == 'push' && github.ref || github.event.repository.default_branch }}
+          fetch-depth: 0
+          persist-credentials: false
+
+      - uses: actions/setup-node@v6
+        with:
+          node-version-file: .node-version
+          registry-url: https://registry.npmjs.org
+
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version-file: package.json
+
+      - name: Update npm for trusted publishing
+        run: npm install --global npm@latest
+
+      - name: Normalize version
+        id: version
+        run: bun scripts/normalize-release-version.js "${{ inputs.version || github.ref_name }}"
+
+      - name: Check for an already published release
+        id: release
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: bun scripts/check-release.js "v$VERSION"
+
+      - name: Resume an existing release tag
+        if: github.event_name == 'workflow_dispatch' && steps.release.outputs.skip != 'true'
+        run: |
+          if git show-ref --verify --quiet "refs/tags/v$VERSION"; then
+            git checkout --detach "v$VERSION"
+          fi
+
+      - name: Sync package version
+        id: sync
+        if: steps.release.outputs.skip != 'true'
+        run: bun scripts/sync-release-version.js
+
+      - name: Reuse CI checks for this commit
+        if: >-
+          github.event_name == 'push' && steps.release.outputs.skip != 'true' &&
+          steps.sync.outputs.changed != 'true'
+        timeout-minutes: 20
+        uses: lewagon/wait-on-check-action@v1.9.1
+        with:
+          ref: ${{ github.sha }}
+          check-name: Checks
+          repo-token: ${{ github.token }}
+          allowed-conclusions: success
+
+      - name: Check the release candidate
+        if: >-
+          steps.release.outputs.skip != 'true' &&
+          (github.event_name == 'workflow_dispatch' || steps.sync.outputs.changed == 'true')
+        run: |
+          bun install --frozen-lockfile
+          bun run ci
+
+      - name: Commit and publish the checked version
+        if: steps.release.outputs.skip != 'true'
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          DEFAULT_BRANCH: ${{ github.event.repository.default_branch }}
+        run: bun scripts/publish-release-commit.js
+
+      - name: Publish package to npm
+        if: steps.release.outputs.skip != 'true'
+        env:
+          NPM_DIST_TAG: ${{ steps.version.outputs.dist-tag }}
+        run: |
+          package_name="$(node -p "require('./package.json').name")"
+          if npm view "$package_name@$VERSION" version >/dev/null 2>&1; then
+            echo "Package $package_name@$VERSION is already published; skipping."
+          else
+            npm publish --ignore-scripts --access public --tag "$NPM_DIST_TAG"
+          fi
+
+      - name: Create the GitHub release
+        if: steps.release.outputs.skip != 'true'
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: gh release create "v$VERSION" --verify-tag --generate-notes --title "v$VERSION"

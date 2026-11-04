@@ -2,6 +2,11 @@
   "name": "@sn0wo2/opencode-terminal-progress",
   "version": "0.1.0",
   "type": "module",
+  "description": "OpenCode TUI plugin for terminal notifications: system toasts, bell, OSC notify, and progress",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/Sn0wo2/oc-terminal-progress.git"
+  },
   "packageManager": "bun@1.4.4",
   "publishConfig": {
     "access": "public"
