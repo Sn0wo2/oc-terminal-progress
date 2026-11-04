@@ -21,7 +21,7 @@
     "ci": "bun run lint && bun run check && bun run security"
   },
   "dependencies": {
-    "@opencode/plugin": "^2.0.29"
+    "@opencode/plugin": "^2.2.5"
   },
   "peerDependencies": {
     "solid-js": ">=1.9.0"
