@@ -89,7 +89,7 @@ jobs:
           DEFAULT_BRANCH: ${{ github.event.repository.default_branch }}
         run: bun scripts/publish-release-commit.js
 
-      - name: Publish package to npm
+      - name: Publish npm package
         if: steps.release.outputs.skip != 'true'
         env:
           NPM_DIST_TAG: ${{ steps.version.outputs.dist-tag }}
@@ -98,7 +98,7 @@ jobs:
           if npm view "$package_name@$VERSION" version >/dev/null 2>&1; then
             echo "Package $package_name@$VERSION is already published; skipping."
           else
-            npm publish --ignore-scripts --access public --tag "$NPM_DIST_TAG"
+            npm publish --access public --tag "$NPM_DIST_TAG"
           fi
 
       - name: Create the GitHub release
