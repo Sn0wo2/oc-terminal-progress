@@ -1,5 +1,6 @@
 import { Plugin } from "@opencode/plugin/tui"
-import { createSystemToast } from "./platform"
+import notifier from "node-notifier"
+import { focusTerminal, registerToastAppID } from "./platform"
 import { claimNotification, normalizeText, writeTerminal } from "./utils"
 
 export default Plugin.define({
@@ -11,17 +12,22 @@ export default Plugin.define({
       oscNotify?: "9" | "777" | "99"
       oscProgress?: boolean
     }
+    const appID = toast === false ? undefined : registerToastAppID()
     const systemToast =
-      toast !== false
-        ? createSystemToast((sessionID) => {
-            if (
-              context.ui.tabs.enabled() &&
-              (context.ui.tabs.focus(sessionID) || context.ui.tabs.focus(context.data.session.root(sessionID)))
-            )
-              return
-            context.ui.router.navigate({ type: "session", sessionID })
-          })
-        : undefined
+      toast === false
+        ? undefined
+        : (title: string, message: string, sessionID?: string) =>
+            notifier.notify(appID ? { title, message, appID } : { title, message }, (error, response) => {
+              if (error || response !== "activate") return
+              focusTerminal()
+              if (!sessionID) return
+              if (
+                context.ui.tabs.enabled() &&
+                (context.ui.tabs.focus(sessionID) || context.ui.tabs.focus(context.data.session.root(sessionID)))
+              )
+                return
+              context.ui.router.navigate({ type: "session", sessionID })
+            })
     let notificationId = 0
     let currentSessionId: string | undefined
     let state = 0
@@ -241,7 +247,6 @@ export default Plugin.define({
       for (const timeout of permissionTimers.values()) clearTimeout(timeout)
       permissionTimers.clear()
       unsubscribe()
-      systemToast?.dispose?.()
       setState(0)
     }
   },

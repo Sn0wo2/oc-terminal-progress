@@ -9,8 +9,7 @@
   },
   "packageManager": "bun@1.4.4",
   "files": [
-    "src",
-    "assets"
+    "src"
   ],
   "exports": {
     "./tui": "./src/tui.ts"
@@ -23,15 +22,19 @@
     "ci": "bun run lint && bun run check && bun run security"
   },
   "dependencies": {
-    "@opencode/plugin": "^2.2.5"
+    "@opencode/plugin": "^2.2.5",
+    "node-notifier": "^12.1.0"
   },
   "peerDependencies": {
     "solid-js": ">=1.9.0"
   },
   "devDependencies": {
     "@biomejs/biome": "^2.6.5",
-    "@opentui/core": "~0.6.8",
+    "@octokit/graphql": "^9.0.5",
+    "@opentui/core": "^0.8.2",
     "@types/bun": "^1.4.4",
+    "execa": "^10.2.1",
+    "semver": "^7.8.6",
     "typescript": "^7.0.2"
   },
   "overrides": {
