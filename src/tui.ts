@@ -1,3 +1,4 @@
+import { fileURLToPath } from "node:url"
 import { Plugin } from "@opencode/plugin/tui"
 import notifier from "node-notifier"
 import { focusTerminal, registerToastAppID } from "./platform"
@@ -13,21 +14,41 @@ export default Plugin.define({
       oscProgress?: boolean
     }
     const appID = toast === false ? undefined : registerToastAppID()
+    const toastIcon =
+      process.platform === "win32" ? fileURLToPath(new URL("./assets/opencode.png", import.meta.url)) : undefined
     const systemToast =
       toast === false
         ? undefined
         : (title: string, message: string, sessionID?: string) =>
-            notifier.notify(appID ? { title, message, appID } : { title, message }, (error, response) => {
-              if (error || response !== "activate") return
-              focusTerminal()
-              if (!sessionID) return
-              if (
-                context.ui.tabs.enabled() &&
-                (context.ui.tabs.focus(sessionID) || context.ui.tabs.focus(context.data.session.root(sessionID)))
-              )
-                return
-              context.ui.router.navigate({ type: "session", sessionID })
-            })
+            notifier.notify(
+              {
+                title: process.platform === "win32" ? `OC | ${title}` : title,
+                message,
+                ...(appID ? { appID } : {}),
+                ...(toastIcon ? { icon: toastIcon } : {}),
+              },
+              (error, response, metadata) => {
+                const activated = [response, metadata?.activationType].some((value) => {
+                  const type = value?.toLowerCase().trim()
+                  return (
+                    type === "activate" ||
+                    type === "click" ||
+                    type === "foreground" ||
+                    type === "protocol" ||
+                    !!type?.endsWith("clicked")
+                  )
+                })
+                if (error || !activated) return
+                focusTerminal()
+                if (!sessionID) return
+                if (
+                  context.ui.tabs.enabled() &&
+                  (context.ui.tabs.focus(sessionID) || context.ui.tabs.focus(context.data.session.root(sessionID)))
+                )
+                  return
+                context.ui.router.navigate({ type: "session", sessionID })
+              },
+            )
     let notificationId = 0
     let currentSessionId: string | undefined
     let state = 0
@@ -121,9 +142,12 @@ export default Plugin.define({
           if (!pending || disposed) return
           eligiblePermissions.add(key)
           if (activeFamily.has(sessionID)) clearCompletion()
+          const action = normalizeText(pending.action, 40)
+          const resources = normalizeText(pending.resources.join(", "), 90)
+          const reason = normalizeText(pending.message ?? "", 65)
           sessionNotify(
             sessionID,
-            `Permission required: ${pending.action}${pending.resources.length ? `; Resources: ${pending.resources.join(", ")}` : ""}${pending.message ? `; ${pending.message}` : ""}`,
+            `Permission: ${action}${resources ? ` | Resources: ${resources}` : ""}${reason ? ` | Reason: ${reason}` : ""}`,
             true,
             `permission.request:${key}`,
             true,
@@ -131,6 +155,22 @@ export default Plugin.define({
           queueMicrotask(update)
         }, 500),
       )
+    }
+
+    const completionMessage = async (sessionID: string) => {
+      await context.data.session.message.sync(sessionID).catch(() => {})
+      const message = context.data.session.message
+        .list(sessionID)
+        .findLast((entry) => entry.type === "assistant" && entry.finish !== "tool-calls")
+      const response =
+        message?.type === "assistant"
+          ? message.content
+              .filter((part) => part.type === "text")
+              .map((part) => part.text)
+              .join(" ")
+              .trim()
+          : undefined
+      return response ? `Completed: ${response}` : "Task completed"
     }
 
     const update = () => {
@@ -185,9 +225,35 @@ export default Plugin.define({
       } else if (type === "form.created") {
         if (remember(details)) {
           if (activeFamily.has(details.data.form.sessionID)) clearCompletion()
+          const fields = details.data.form.fields.filter((field) => !("hidden" in field && field.hidden))
+          const first = fields[0]
+          const question = first
+            ? normalizeText(first.title || first.key, 38) +
+              ("options" in first && first.options?.length
+                ? ` [Options: ${normalizeText(first.options.map((option) => option.label).join(", "), 50)}]`
+                : "") +
+              (first.description || ("placeholder" in first ? first.placeholder : "")
+                ? ` — ${normalizeText(first.description || ("placeholder" in first ? first.placeholder : "") || "", 30)}`
+                : "")
+            : ""
+          let message = `Answer needed: ${normalizeText(details.data.form.title, 40)}${question ? ` — ${question}` : ""}`
+          for (const field of fields.slice(1)) {
+            const prompt = normalizeText(field.title || field.key, 45)
+            const choices =
+              "options" in field && field.options?.length
+                ? ` [Options: ${normalizeText(field.options.map((option) => option.label).join(", "), 50)}]`
+                : ""
+            const detail = `${prompt}${choices}`
+            const remaining = 240 - message.length - 2
+            if (detail.length <= remaining) message += `; ${detail}`
+            else {
+              if (prompt.length <= remaining) message += `; ${prompt}`
+              break
+            }
+          }
           sessionNotify(
             details.data.form.sessionID,
-            `Awaiting answer: ${details.data.form.title}`,
+            message,
             true,
             `${type}:${details.data.form.sessionID}:${details.id}`,
             true,
@@ -215,14 +281,14 @@ export default Plugin.define({
               update()
             }, 1500)
           }
-          sessionNotify(
-            details.data.sessionID,
-            details.type === "session.execution.failed"
-              ? `Task failed: ${details.data.error.message}`
-              : "Task completed",
-            !isCurrentSession,
-            eventID,
-          )
+          const notify = async () => {
+            const message =
+              details.type === "session.execution.failed"
+                ? `Failed: ${normalizeText(details.data.error.message, 232) || "Task failed"}`
+                : await completionMessage(details.data.sessionID)
+            sessionNotify(details.data.sessionID, message, !isCurrentSession, eventID)
+          }
+          void notify()
         }
       } else if (type === "session.execution.started") {
         if (activeFamily.has(details.data.sessionID)) clearCompletion()

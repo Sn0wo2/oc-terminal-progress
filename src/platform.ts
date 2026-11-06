@@ -1,6 +1,6 @@
 import type { Pointer } from "bun:ffi"
 import { dlopen, FFIType, ptr } from "bun:ffi"
-import { existsSync } from "node:fs"
+import { existsSync, mkdirSync } from "node:fs"
 import { join } from "node:path"
 import { fileURLToPath } from "node:url"
 
@@ -116,19 +116,19 @@ export const focusTerminal = () => {
 
 /** Registers the toast identity (Start Menu shortcut) if needed; returns the AUMID to use, if any. */
 export const registerToastAppID = (): string | undefined => {
-  if (process.platform !== "win32") return undefined
+  if (process.platform !== "win32" || process.arch !== "x64") return undefined
   try {
-    const appData = process.env["APPDATA"]
-    const shortcut = appData
-      ? join(appData, "Microsoft", "Windows", "Start Menu", "Programs", "OpenCode Terminal Progress.lnk")
-      : undefined
-    if (shortcut && !existsSync(shortcut)) {
+    const appData = process.env.APPDATA
+    const programs = appData ? join(appData, "Microsoft", "Windows", "Start Menu", "Programs") : undefined
+    const shortcut = programs ? join(programs, "OpenCode Terminal Progress.lnk") : undefined
+    if (shortcut && programs && !existsSync(shortcut)) {
       const snoretoast = fileURLToPath(
         new URL(
-          `../vendor/snoreToast/snoretoast-${process.arch === "x64" ? "x64" : "x86"}.exe`,
+          `./vendor/snoreToast/snoretoast-${process.arch === "x64" ? "x64" : "x86"}.exe`,
           import.meta.resolve("node-notifier/package.json"),
         ),
       )
+      mkdirSync(programs, { recursive: true })
       Bun.spawnSync([snoretoast, "-install", shortcut, process.execPath, PLUGIN_AUMID], {
         stdout: "ignore",
         stderr: "ignore",
